@@ -27,6 +27,30 @@ SITES TEBLE
 <img width="1417" height="371" alt="image" src="https://github.com/user-attachments/assets/18cca4a3-7c02-486a-a4f8-4cf5d3a83dcc" />
 <img width="1561" height="357" alt="image" src="https://github.com/user-attachments/assets/2c924b95-5bcf-4cf6-a46e-586f7aaf375e" />
 <img width="1423" height="188" alt="image" src="https://github.com/user-attachments/assets/08deba0b-4fc1-41c6-ba3c-74085d98cde0" />
-CONTRUCTORS TABLE 
-
 <img width="1609" height="246" alt="Screenshot 2025-09-21 122337" src="https://github.com/user-attachments/assets/3b45bb25-6752-46d0-bfd4-862f6ad3fdf7" />
+CONTRUCTORS TABLE 
+<img width="1477" height="265" alt="image" src="https://github.com/user-attachments/assets/8201feab-9feb-42bf-814a-540efb9a64a1" />
+<img width="1647" height="235" alt="image" src="https://github.com/user-attachments/assets/30b81646-2dbc-42da-bbab-ccc8194be2aa" />
+<img width="1757" height="325" alt="image" src="https://github.com/user-attachments/assets/a79c8928-a51d-4123-b556-120342f9bd22" />
+<img width="1485" height="188" alt="image" src="https://github.com/user-attachments/assets/3460f0c2-3b5e-4b92-ad21-16d64fbd01aa" />
+<img width="668" height="392" alt="image" src="https://github.com/user-attachments/assets/da4e7a3c-972d-426e-b96e-0094f713fe2a" />
+<img width="1620" height="277" alt="image" src="https://github.com/user-attachments/assets/09c11353-8eca-4ffc-b8bc-c93163b282e2" />
+<img width="1265" height="418" alt="image" src="https://github.com/user-attachments/assets/345ee8ee-48e5-40e3-aaf5-c7523b6b304d" />
+<img width="1687" height="261" alt="image" src="https://github.com/user-attachments/assets/4072e9e6-216a-4356-9c71-09ceb6eab0a2" />
+<img width="1620" height="253" alt="image" src="https://github.com/user-attachments/assets/3cc51fbf-25af-40e9-a634-72f9e61cac39" />
+<img width="1652" height="385" alt="image" src="https://github.com/user-attachments/assets/e17d9088-553c-497f-8f02-47eff6d7f1ae" />
+CLIENTS TABLE  
+<img width="1498" height="243" alt="image" src="https://github.com/user-attachments/assets/a6b2491e-c07b-47e4-baa7-fa072a3143d4" />
+<img width="1047" height="372" alt="image" src="https://github.com/user-attachments/assets/bba27d18-8e1d-4085-b2f0-c66ddd4691ff" />
+<img width="1568" height="323" alt="image" src="https://github.com/user-attachments/assets/bf65f3be-2461-418c-824c-ff9d46da4952" />
+<img width="1430" height="342" alt="image" src="https://github.com/user-attachments/assets/1bf6c9d5-0c06-4cbf-9fe5-c75ed8986070" />
+<img width="1530" height="252" alt="image" src="https://github.com/user-attachments/assets/8156338b-d5e7-419a-9e8d-ae155f8741b8" />
+<img width="1456" height="387" alt="image" src="https://github.com/user-attachments/assets/30b4e9f3-ccf4-473f-acf6-9e5d30297429" />
+<img width="1731" height="367" alt="image" src="https://github.com/user-attachments/assets/e01df2a9-eff2-4fe8-a0b4-30ee0251e14b" />
+<img width="1782" height="261" alt="image" src="https://github.com/user-attachments/assets/69a86704-9f9d-4001-bf14-844914fe7b83" />
+<img width="1617" height="200" alt="image" src="https://github.com/user-attachments/assets/89279227-980e-4f6e-b9e7-f8b5580d707e" />
+<img width="1473" height="323" alt="image" src="https://github.com/user-attachments/assets/8c326e78-f4e3-42bf-8a55-0af4a20ffb1a" />
+<img width="1655" height="381" alt="image" src="https://github.com/user-attachments/assets/5597a3c9-c658-41e6-86f4-e5da37aa9868" />
+<img width="1232" height="283" alt="image" src="https://github.com/user-attachments/assets/f08a9a7d-7aca-4c1e-8ad0-a3b500c31c22" />
+<img width="1260" height="356" alt="image" src="https://github.com/user-attachments/assets/ccd23017-5de8-4ab9-997b-e719c5831076" />
+AGENTS TABLES
