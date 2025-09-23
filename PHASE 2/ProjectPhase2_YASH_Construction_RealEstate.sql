@@ -384,100 +384,96 @@ FROM Clients;
 
 -- 5. Agents
 
--- 1. Show clients from Maharashtra
-SELECT ClientID, Name, City, State 
-FROM Clients 
-WHERE State = 'Maharashtra';
+-- 1. Show agents with more than 7 years of experience
+SELECT Name, ExperienceYears FROM Agents
+WHERE ExperienceYears > 7;
 
--- 2. Clients with phone numbers starting with '98'
-SELECT ClientID, Name, Phone 
-FROM Clients 
-WHERE Phone LIKE '98%';
+-- 2. Find agents with rating above 4.5
+SELECT AgentID, Name, Rating FROM Agents
+WHERE Rating > 4.5;
 
--- 3. Clients who registered in 2023
-SELECT Name, RegistrationDate 
-FROM Clients 
-WHERE YEAR(RegistrationDate) = 2023;
+-- 3. Order agents by CommissionRate (descending)
+SELECT Name, CommissionRate FROM Agents
+ORDER BY CommissionRate DESC;
 
--- 4. Clients with Gmail accounts
-SELECT ClientID, Name, Email 
-FROM Clients 
-WHERE Email LIKE '%@gmail.com';
+-- 4. Get top 5 agents by Rating
+SELECT Name, Rating FROM Agents
+ORDER BY Rating DESC
+LIMIT 5;
 
--- 5. Clients from Pune or Mumbai
-SELECT Name, City, State 
-FROM Clients 
-WHERE City IN ('Pune', 'Mumbai');
+-- 5. Count agents based on specialization
+SELECT Specialization, COUNT(*) AS TotalAgents
+FROM Agents
+GROUP BY Specialization;
 
--- 6. Clients not from Delhi
-SELECT ClientID, Name, City 
-FROM Clients 
-WHERE City <> 'Delhi';
+-- 6. Average rating of Residential agents
+SELECT Specialization, AVG(Rating) AS AvgRating
+FROM Agents
+WHERE Specialization = 'Residential'
+GROUP BY Specialization;
 
--- 7. Count clients by city
-SELECT City, COUNT(*) AS TotalClients 
-FROM Clients 
-GROUP BY City;
+-- 7. Find agents with commission rate above average
+SELECT Name, CommissionRate FROM Agents
+WHERE CommissionRate > (SELECT AVG(CommissionRate) FROM Agents);
 
--- 8. Count clients by type
-SELECT ClientType, COUNT(*) AS ClientCount 
-FROM Clients 
-GROUP BY ClientType;
+-- 8. Update phone number of agent with AgentID=3
+UPDATE Agents
+SET Phone = '9800000000'
+WHERE AgentID = 3;
 
--- 9. Find the most recent registered client
-SELECT Name, RegistrationDate 
-FROM Clients 
-ORDER BY RegistrationDate DESC 
-LIMIT 1;
+-- 9. Update status to 'Inactive' for agents with Rating < 4.0
+UPDATE Agents
+SET Status = 'Inactive'
+WHERE Rating < 4.0;
 
--- 10. Find earliest registered client
-SELECT Name, RegistrationDate 
-FROM Clients 
-ORDER BY RegistrationDate ASC 
-LIMIT 1;
+-- 10. Increase commission rate by 0.2 for Luxury specialists
+UPDATE Agents
+SET CommissionRate = CommissionRate + 0.20
+WHERE Specialization LIKE '%Luxury%';
 
--- 11. Update phone number of client ID = 5
-UPDATE Clients 
-SET Phone = '9876500000' 
-WHERE ClientID = 5;
+-- 11. Delete agents with less than 3 years of experience
+DELETE FROM Agents
+WHERE ExperienceYears < 3;
 
--- 12. Update all corporate clients to status = "Active"
-UPDATE Clients 
-SET Status = 'Active' 
-WHERE ClientType = 'Corporate';
+-- 12. Delete an agent by email
+DELETE FROM Agents
+WHERE Email = 'vikram.r@estatex.com';
 
--- 13. Delete clients without email
-DELETE FROM Clients 
-WHERE Email IS NULL;
+-- 13. Add a new column for TotalSales
+ALTER TABLE Agents
+ADD TotalSales INT DEFAULT 0;
 
--- 14. Delete clients registered before 2020
-DELETE FROM Clients 
-WHERE YEAR(RegistrationDate) < 2020;
+-- 14. Modify column CommissionRate precision
+ALTER TABLE Agents
+MODIFY CommissionRate DECIMAL(6,3);
 
--- 15. Add a new column for Aadhaar number
-ALTER TABLE Clients 
-ADD AadhaarNumber VARCHAR(12);
+-- 15. Rename column "Phone" to "Mobile"
+ALTER TABLE Agents
+CHANGE Phone Mobile VARCHAR(15);
 
--- 16. Modify Email column size
-ALTER TABLE Clients 
-MODIFY Email VARCHAR(150);
+-- 16. Find average commission per specialization (HAVING filter)
+SELECT Specialization, AVG(CommissionRate) AS AvgCommission
+FROM Agents
+GROUP BY Specialization
+HAVING AVG(CommissionRate) > 1.80;
 
--- 17. Rename column ClientType → Category
-ALTER TABLE Clients 
-RENAME COLUMN ClientType TO Category;
+-- 17. List agents whose name starts with 'A'
+SELECT * FROM Agents
+WHERE Name LIKE 'A%';
 
--- 18. Show client name and email with alias
-SELECT Name AS ClientName, Email AS ContactEmail 
-FROM Clients;
+-- 18. Select distinct specializations
+SELECT DISTINCT Specialization FROM Agents;
 
--- 19. Show clients registered between Jan and Jun 2022
-SELECT Name, RegistrationDate 
-FROM Clients 
-WHERE RegistrationDate BETWEEN '2022-01-01' AND '2022-06-30';
+-- 19. Show top 3 experienced agents in Mumbai
+SELECT Name, ExperienceYears, Address FROM Agents
+WHERE Address LIKE '%Mumbai%'
+ORDER BY ExperienceYears DESC
+LIMIT 3;
 
--- 20. Show distinct states where clients are located
-SELECT DISTINCT State 
-FROM Clients;
+-- 20. Find agents who earn commission above 2.0 and have rating above 4.5
+SELECT Name, CommissionRate, Rating FROM Agents
+WHERE CommissionRate > 2.0 AND Rating > 4.5;
+
 
 -- 6. PropertyListings
 
