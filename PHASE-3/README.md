@@ -1,3 +1,8 @@
+
+In this phase, you will demonstrate advanced SQL proficiency by mastering table joins, subqueries, built-in functions, and user-defined functions (UDFs). You will connect multiple tables, perform complex queries, and implement reusable functions while maintaining professional standards with full documentation.
+
+Screenshots: 
+
 <img width="788" height="276" alt="image" src="https://github.com/user-attachments/assets/28835c69-54dc-4654-8a83-e0583453d1af" />
 <img width="1268" height="501" alt="image" src="https://github.com/user-attachments/assets/85ae6242-b529-4a49-9dd8-3063ea92df32" />
 <img width="1120" height="316" alt="image" src="https://github.com/user-attachments/assets/db52620d-b1b5-41ca-a8a4-a3828fd81006" />
