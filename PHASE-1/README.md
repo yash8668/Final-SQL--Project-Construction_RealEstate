@@ -1,4 +1,12 @@
 
+
+ 
+Phase One covers the fundamentals of databases, including creating tables with attributes and constraints, inserting records using INSERT,
+and retrieving records using SELECT. It also includes managing tables with TRUNCATE and DROP, and documenting table structures, attributes, 
+and queries. This phase builds the foundation for learning more advanced SQL operations in later phases.
+
+Screenshots :
+
 <img width="1228" height="555" alt="image" src="https://github.com/user-attachments/assets/4cd53417-0d89-46c2-a6b7-9a181d4cf547" />
 
 <img width="1127" height="501" alt="image" src="https://github.com/user-attachments/assets/c5924359-6103-4ce4-b9ee-67c8793d230c" />
@@ -51,18 +59,4 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-Phase One covers the fundamentals of databases, including creating tables with attributes and constraints, inserting records using INSERT,
-and retrieving records using SELECT. It also includes managing tables with TRUNCATE and DROP, and documenting table structures, attributes, 
-and queries. This phase builds the foundation for learning more advanced SQL operations in later phases.
 
