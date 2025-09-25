@@ -1,3 +1,9 @@
+
+In Phase-2, you will demonstrate full SQL mastery by applying all query languages (DDL, DML, DQL), operators, clauses, aliases, and cascading rules. This phase ensures you can create, manipulate, query, and control database records effectively, following professional query-writing standards, with extreme focus on clarity, optimization, and maintainability
+
+
+Screenshort  :
+
 PROJECT TABLE  
 <img width="1687" height="538" alt="Screenshot 2025-09-21 121249" src="https://github.com/user-attachments/assets/594f6b31-aa11-4ff5-be40-7cadb82e427e" />
 <img width="1675" height="441" alt="Screenshot 2025-09-21 121354" src="https://github.com/user-attachments/assets/bc6bdb8f-0a46-4531-bb48-f4b53dee9991" />
