@@ -1,541 +1,1403 @@
-use  Construction_RealEstate;
+use  Construction_RealEstate ; 
 
--- 1. List all vendors with rating above 4.5
-SELECT * 
-FROM Vendors
-WHERE Rating > 4.5;
+-- Q1: Calculate the 90-day rolling average of total daily sales price, partitioning by project type.
+WITH DailySales AS (
+    SELECT 
+        SaleDate, 
+        p.Type,
+        SUM(FinalPrice) AS DailyTotal
+    FROM Sales s
+    JOIN PropertyListings pl ON s.PropertyID = pl.PropertyID
+    JOIN Projects p ON pl.ProjectID = p.ProjectID
+    GROUP BY SaleDate, p.Type
+)
+SELECT
+    SaleDate,
+    Type,
+    DailyTotal,
+    AVG(DailyTotal) OVER (
+        PARTITION BY Type 
+        ORDER BY SaleDate 
+        RANGE BETWEEN INTERVAL '90' DAY PRECEDING AND CURRENT ROW
+    ) AS RollingAvg90Day
+FROM DailySales
+ORDER BY Type, SaleDate;
 
--- 2. Vendors in “Mumbai”
-SELECT * 
-FROM Vendors
-WHERE Address LIKE '%Mumbai%';
+-- Q2: Find the top 3 best-rated Contractors by average rating who have been assigned a Maintenance Request in the last 6 months.
+SELECT 
+    c.Name,
+    c.Specialization,
+    c.Rating,
+    RANK() OVER (ORDER BY c.Rating DESC) AS Rank_By_Rating
+FROM Contractors c
+WHERE c.ContractorID IN (
+    SELECT AssignedTo
+    FROM MaintenanceRequests
+    WHERE RequestDate >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+    GROUP BY AssignedTo
+    HAVING COUNT(*) > 0
+)
+ORDER BY c.Rating DESC
+LIMIT 3;
 
--- 3. Vendors with “Paint” service type
-SELECT * 
-FROM Vendors
-WHERE ServiceType = 'Paint';
+-- Q3: Identify the Agents whose total commission earned is above the average commission of Agents specializing in the same 'Specialization'.
+WITH AgentCommission AS (
+    SELECT
+        a.AgentID,
+        a.Name,
+        a.Specialization,
+        SUM(s.FinalPrice * (a.CommissionRate / 100)) AS TotalCommission
+    FROM Agents a
+    JOIN Sales s ON a.AgentID = s.AgentID
+    GROUP BY a.AgentID, a.Name, a.Specialization
+),
+SpecializationAvg AS (
+    SELECT
+        Specialization,
+        AVG(TotalCommission) AS AvgCommission
+    FROM AgentCommission
+    GROUP BY Specialization
+)
+SELECT
+    ac.Name,
+    ac.Specialization,
+    ac.TotalCommission
+FROM AgentCommission ac
+JOIN SpecializationAvg sa ON ac.Specialization = sa.Specialization
+WHERE ac.TotalCommission > sa.AvgCommission
+ORDER BY ac.TotalCommission DESC;
 
--- 4. Vendors whose status is not “Approved”
-SELECT * 
-FROM Vendors
-WHERE Status <> 'Approved';
+-- Q4: Calculate the Budget Variance Percentage (ActualCost vs Budget) for each Construction Phase and rank them from worst (highest negative variance) to best.
+SELECT
+    p.Name AS ProjectName,
+    cp.PhaseName,
+    cp.Budget,
+    cp.ActualCost,
+    (cp.ActualCost - cp.Budget) AS VarianceAmount,
+    ((cp.ActualCost - cp.Budget) / cp.Budget) * 100 AS VariancePercent,
+    RANK() OVER (ORDER BY ((cp.ActualCost - cp.Budget) / cp.Budget) * 100 DESC) AS Rank_Worst_Variance
+FROM ConstructionPhases cp
+JOIN Projects p ON cp.ProjectID = p.ProjectID
+WHERE cp.Budget IS NOT NULL AND cp.Budget > 0
+ORDER BY Rank_Worst_Variance;
 
--- 5. Vendors whose email ends with “@gmail.com”
-SELECT * 
-FROM Vendors
-WHERE Email LIKE '%@gmail.com';
+-- Q5: Find the property listings that have generated a high-priority Lead but have not yet resulted in a completed Sale.
+SELECT
+    pl.PropertyID,
+    pl.Title,
+    p.Name AS ProjectName
+FROM PropertyListings pl
+JOIN Projects p ON pl.ProjectID = p.ProjectID
+WHERE pl.PropertyID IN (
+    -- Properties with a high-priority lead
+    SELECT PropertyID
+    FROM Leads
+    WHERE Priority = 'High'
+)
+AND pl.PropertyID NOT IN (
+    -- Properties with a completed sale
+    SELECT PropertyID
+    FROM Sales
+    WHERE Status = 'Completed'
+);
 
--- 6. Vendors sorted by rating descending
-SELECT * 
-FROM Vendors
-ORDER BY Rating DESC;
+-- Q6: List all Employees, their direct Manager's name, and the total count of subordinates (direct and indirect) under them.
+WITH RECURSIVE EmployeeHierarchy AS (
+    SELECT
+        EmployeeID,
+        FullName,
+        ManagerID,
+        1 AS Level
+    FROM Employees
+    WHERE ManagerID IS NULL 
+    UNION ALL
+    SELECT
+        e.EmployeeID,
+        e.FullName,
+        e.ManagerID,
+        eh.Level + 1
+    FROM Employees e
+    INNER JOIN EmployeeHierarchy eh ON e.ManagerID = eh.EmployeeID
+),
+SubordinateCount AS (
+    SELECT
+        ManagerID,
+        COUNT(EmployeeID) AS TotalSubordinates
+    FROM Employees
+    GROUP BY ManagerID
+)
+SELECT
+    e.EmployeeID,
+    e.FullName AS EmployeeName,
+    m.FullName AS ManagerName,
+    COALESCE(sc.TotalSubordinates, 0) AS TotalDirectSubordinates 
+FROM Employees e
+LEFT JOIN Employees m ON e.ManagerID = m.EmployeeID
+LEFT JOIN SubordinateCount sc ON e.EmployeeID = sc.ManagerID
+ORDER BY e.ManagerID , e.FullName;
 
--- 7. Vendors with duplicate GSTNumber (data anomaly)
-SELECT GSTNumber, COUNT(*) AS cnt
-FROM Vendors
-GROUP BY GSTNumber
-HAVING cnt > 1;
+-- Q7: Retrieve all Materials that have their StockQuantity less than 10% of the total Quantity ordered across all Purchase Orders they appear in.
+SELECT
+    m.Name AS MaterialName,
+    m.StockQuantity,
+    t.TotalOrdered,
+    (m.StockQuantity / t.TotalOrdered) * 100 AS StockPercentage
+FROM Materials m
+JOIN (
+    SELECT 
+        MaterialID, 
+        SUM(Quantity) AS TotalOrdered 
+    FROM PurchaseOrders
+    GROUP BY MaterialID
+) t ON m.MaterialID = t.MaterialID
+WHERE m.StockQuantity < (0.10 * t.TotalOrdered);
 
--- 8. Materials running low (stock < 100)
-SELECT * 
-FROM Materials
-WHERE StockQuantity < 100;
+-- Q8: Compare the total rental income generated by 'Residential' properties versus 'Commercial' properties based on active Leases.
+SELECT
+    pl.Type AS PropertyType,
+    SUM(l.RentAmount * (DATEDIFF(l.EndDate, l.StartDate) / 30.0)) AS ProjectedTotalRent
+FROM Leases l
+JOIN PropertyListings pl ON l.PropertyID = pl.PropertyID
+WHERE l.Status = 'Active'
+GROUP BY pl.Type
+HAVING pl.Type IN ('Residential', 'Commercial');
 
--- 9. Materials by category “Finishing”
-SELECT * 
-FROM Materials
-WHERE Category = 'Finishing';
+-- Q9: Find all Projects that have an active 'Building Permit' and have at least one Site with a 'Cleared' status. (4-way Join with Exists)
+SELECT
+    p.ProjectID,
+    p.Name AS ProjectName,
+    s.Address AS ClearedSiteAddress
+FROM Projects p
+JOIN Sites s ON p.ProjectID = s.ProjectID
+WHERE s.Status = 'Cleared'
+AND EXISTS (
+    SELECT 1
+    FROM Permits pt
+    JOIN Sites ps ON pt.SiteID = ps.SiteID
+    WHERE ps.ProjectID = p.ProjectID
+    AND pt.Type = 'Building Permit'
+    AND pt.Status = 'Active'
+)
+ORDER BY p.ProjectID;
 
--- 10. Materials with zero stock
-SELECT * 
-FROM Materials
-WHERE StockQuantity = 0;
+-- Q10: Determine the average lead conversion rate (Converted Leads / Total Leads) per month for the last 6 months.
+WITH MonthlyLeads AS (
+    SELECT
+        DATE_FORMAT(InquiryDate, '%Y-%m') AS InquiryMonth,
+        COUNT(LeadID) AS TotalLeads,
+        SUM(CASE WHEN Status = 'Converted' THEN 1 ELSE 0 END) AS ConvertedLeads
+    FROM Leads
+    WHERE InquiryDate >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+    GROUP BY InquiryMonth
+)
+SELECT
+    InquiryMonth,
+    (ConvertedLeads / TotalLeads) * 100 AS ConversionRatePercent
+FROM MonthlyLeads
+ORDER BY InquiryMonth DESC;
 
--- 11. Materials not “Available”
-SELECT * 
-FROM Materials
-WHERE Status <> 'Available';
+-- Q11: Calculate the cumulative sum of 'PaidAmount' from Invoices over time, grouped by Vendor, and show the percentage of total paid to that vendor.
+WITH VendorPayments AS (
+    SELECT
+        VendorID,
+        InvoiceDate,
+        PaidAmount,
+        SUM(PaidAmount) OVER (PARTITION BY VendorID) AS TotalVendorPaid
+    FROM Invoices
+    WHERE Status = 'Paid'
+)
+SELECT
+    v.CompanyName,
+    vp.InvoiceDate,
+    vp.PaidAmount,
+    SUM(vp.PaidAmount) OVER (
+        PARTITION BY vp.VendorID
+        ORDER BY vp.InvoiceDate
+    ) AS CumulativePaidAmount,
+    (vp.PaidAmount / vp.TotalVendorPaid) * 100 AS PercentOfTotalPaidToVendor
+FROM VendorPayments vp
+JOIN Vendors v ON vp.VendorID = v.VendorID
+ORDER BY v.CompanyName, vp.InvoiceDate;
 
--- 12. Materials last updated before 2025-01-01
-SELECT * 
-FROM Materials
-WHERE LastUpdated < '2025-01-01';
-
--- 13. Most expensive material (highest PricePerUnit)
-SELECT * 
-FROM Materials
-ORDER BY PricePerUnit DESC
+-- Q12: Find the Project Manager (Employee) who manages the projects with the highest average property listing price.
+SELECT
+    e.FullName AS ProjectManager,
+    AVG(pl.Price) AS AvgListingPrice
+FROM Projects p
+JOIN Employees e ON p.ManagerID = e.EmployeeID
+JOIN PropertyListings pl ON p.ProjectID = pl.ProjectID
+GROUP BY e.FullName
+ORDER BY AvgListingPrice DESC
 LIMIT 1;
 
--- 14. Sum of material value in stock (PricePerUnit × StockQuantity)
-SELECT SUM(PricePerUnit * StockQuantity) AS TotalStockValue
-FROM Materials;
+-- Q13: Identify all Clients who have both a 'Completed' Sale and an 'Active' Lease.
+SELECT
+    c.FullName,
+    c.Email
+FROM Clients c
+WHERE c.ClientID IN (
+    SELECT ClientID
+    FROM Sales
+    WHERE Status = 'Completed'
+)
+AND c.ClientID IN (
+    SELECT ClientID
+    FROM Leases
+    WHERE Status = 'Active'
+);
 
--- 15. Materials whose supplier has rating > 4.5
-SELECT m.*
-FROM Materials m
-JOIN Vendors v ON m.SupplierID = v.VendorID
-WHERE v.Rating > 4.5;
+-- Q14: Determine the percentage completion of all tasks for all 'Ongoing' construction phases, grouping by Project Name.
+SELECT
+    p.Name AS ProjectName,
+    cp.PhaseName,
+    SUM(t.ProgressPercent) / (COUNT(t.TaskID) * 100) * 100 AS PhaseCompletionPercentage
+FROM Projects p
+JOIN ConstructionPhases cp ON p.ProjectID = cp.ProjectID
+JOIN Tasks t ON cp.PhaseID = t.PhaseID
+WHERE cp.Status = 'Ongoing'
+GROUP BY p.Name, cp.PhaseName
+ORDER BY ProjectName, PhaseCompletionPercentage DESC;
 
--- 16. Materials with name starting with “C”
-SELECT * 
-FROM Materials
-WHERE Name LIKE 'C%';
-
--- 17. PurchaseOrders pending delivery
-SELECT * 
-FROM PurchaseOrders
-WHERE Status = 'Pending';
-
--- 18. PurchaseOrders delivered late (DeliveryDate > OrderDate + 7 days)
-SELECT * 
-FROM PurchaseOrders
-WHERE DeliveryDate > OrderDate + INTERVAL 7 DAY;
-
--- 19. Purchase orders in June 2025
-SELECT * 
-FROM PurchaseOrders
-WHERE OrderDate BETWEEN '2025-06-01' AND '2025-06-30';
-
--- 20. PurchaseOrders without delivery date (NULL)
-SELECT * 
-FROM PurchaseOrders
-WHERE DeliveryDate IS NULL;
-
--- 21. PurchaseOrders where TotalCost = 0 (anomaly)
-SELECT * 
-FROM PurchaseOrders
-WHERE TotalCost = 0;
-
--- 22. PurchaseOrders approved by employee 105
-SELECT * 
-FROM PurchaseOrders
-WHERE ApprovedBy = 105;
-
--- 23. Total cost per vendor (sum of all orders)
-SELECT VendorID, SUM(TotalCost) AS TotalSuppliedCost
-FROM PurchaseOrders
-GROUP BY VendorID;
-
--- 24. Top 5 vendors by supplied cost
-SELECT VendorID, SUM(TotalCost) AS TotalSuppliedCost
-FROM PurchaseOrders
-GROUP BY VendorID
-ORDER BY TotalSuppliedCost DESC
+-- Q15: List the top 5 most expensive pieces of Equipment that are currently 'In Maintenance' and the Site they are assigned to.
+SELECT
+    e.Name AS EquipmentName,
+    s.Address AS AssignedSite,
+    e.PurchaseDate,
+    e.MaintenanceDate
+FROM Equipment e
+JOIN Sites s ON e.AssignedToSite = s.SiteID
+WHERE e.Status = 'In Maintenance'
+ORDER BY DATEDIFF(CURDATE(), e.MaintenanceDate) DESC -- Assuming 'most expensive' here means most expensive in terms of time out of service, as price is missing
 LIMIT 5;
 
--- 25. Purchase orders by vendor & material
-SELECT VendorID, MaterialID, COUNT(*) AS NumOrders, SUM(TotalCost) AS SumCost
-FROM PurchaseOrders
-GROUP BY VendorID, MaterialID;
+-- Q16: Find the average price difference between the initial Property Listing Price and the Final Sale Price for each Property Type.
+SELECT
+    pl.Type AS PropertyType,
+    AVG(pl.Price - s.FinalPrice) AS AvgPriceDifference
+FROM PropertyListings pl
+JOIN Sales s ON pl.PropertyID = s.PropertyID
+WHERE s.Status = 'Completed'
+GROUP BY pl.Type
+ORDER BY AvgPriceDifference DESC;
 
--- 26. Purchase orders whose TotalCost does not match PricePerUnit * Quantity
-SELECT po.*
+-- Q17: Create a report showing the count of all 'Valid' Legal Documents for each Project, categorized by Document Type.
+SELECT
+    p.Name AS ProjectName,
+    ld.DocumentType,
+    COUNT(ld.DocumentID) AS ValidDocumentCount
+FROM LegalDocuments ld
+JOIN PropertyListings pl ON ld.PropertyID = pl.PropertyID
+JOIN Projects p ON pl.ProjectID = p.ProjectID
+WHERE ld.Status = 'Valid'
+GROUP BY p.Name, ld.DocumentType
+ORDER BY ProjectName, ValidDocumentCount DESC;
+
+-- Q18: Use a recursive CTE to find the full management chain (from CEO down to each Employee).
+WITH RECURSIVE EmployeeChain AS (
+    SELECT
+        EmployeeID,
+        FullName,
+        ManagerID,
+        CAST(FullName AS CHAR(255)) AS ManagementPath
+    FROM Employees
+    WHERE ManagerID IS NULL -- Anchor member (CEO)
+
+    UNION ALL
+
+    SELECT
+        e.EmployeeID,
+        e.FullName,
+        e.ManagerID,
+        CONCAT(ec.ManagementPath, ' -> ', e.FullName)
+    FROM Employees e
+    JOIN EmployeeChain ec ON e.ManagerID = ec.EmployeeID
+)
+SELECT
+    FullName AS EmployeeName,
+    ManagementPath
+FROM EmployeeChain
+ORDER BY ManagementPath;
+
+-- Q19: Calculate the total area of all sites in each State and rank the States by total area.
+SELECT
+    State,
+    SUM(AreaSqFt) AS TotalArea,
+    RANK() OVER (ORDER BY SUM(AreaSqFt) DESC) AS AreaRank
+FROM Sites
+GROUP BY State
+ORDER BY TotalArea DESC;
+
+-- Q20: Find the client who submitted the highest rating (5) feedback for the Agent who has the highest overall average rating. (5-way join)
+SELECT
+    c.FullName AS ClientName,
+    a.Name AS AgentName,
+    f.Comments
+FROM Feedback f
+JOIN Clients c ON f.ClientID = c.ClientID
+JOIN Agents a ON f.AgentID = a.AgentID
+WHERE f.Rating = 5
+AND a.AgentID = (
+    SELECT AgentID
+    FROM Agents
+    ORDER BY Rating DESC
+    LIMIT 1
+)
+ORDER BY f.SubmittedDate DESC
+LIMIT 1;
+
+-- Q21: Find all Projects where the Total Sale Price of all sold properties exceeds the Project's initial Budget.
+SELECT
+    p.Name AS ProjectName,
+    p.Budget,
+    SUM(s.FinalPrice) AS TotalSalesRevenue
+FROM Projects p
+JOIN PropertyListings pl ON p.ProjectID = pl.ProjectID
+JOIN Sales s ON pl.PropertyID = s.PropertyID
+WHERE s.Status = 'Completed'
+GROUP BY p.ProjectID, p.Name, p.Budget
+HAVING SUM(s.FinalPrice) > p.Budget
+ORDER BY (SUM(s.FinalPrice) - p.Budget) DESC;
+
+-- Q22: Identify the Vendor (Supplier) who has the most 'Pending' Purchase Orders and has a rating below 4.5.
+SELECT
+    v.CompanyName,
+    v.Rating,
+    COUNT(po.OrderID) AS PendingOrderCount
+FROM Vendors v
+JOIN PurchaseOrders po ON v.VendorID = po.VendorID
+WHERE po.Status = 'Pending'
+AND v.Rating < 4.5
+GROUP BY v.VendorID, v.CompanyName, v.Rating
+ORDER BY PendingOrderCount DESC
+LIMIT 1;
+
+-- Q23: Determine the year-over-year growth rate in Total Sales FinalPrice for the "Residential" property type.
+WITH YearlySales AS (
+    SELECT
+        YEAR(SaleDate) AS SaleYear,
+        SUM(s.FinalPrice) AS YearlyTotalSales
+    FROM Sales s
+    JOIN PropertyListings pl ON s.PropertyID = pl.PropertyID
+    WHERE pl.Type = 'Residential' AND s.Status = 'Completed'
+    GROUP BY SaleYear
+)
+SELECT
+    SaleYear,
+    YearlyTotalSales,
+    LAG(YearlyTotalSales, 1, 0) OVER (ORDER BY SaleYear) AS PreviousYearSales,
+    (YearlyTotalSales - LAG(YearlyTotalSales, 1, 0) OVER (ORDER BY SaleYear)) / LAG(YearlyTotalSales, 1, 1) OVER (ORDER BY SaleYear) * 100 AS YoY_Growth_Percent
+FROM YearlySales
+WHERE LAG(YearlyTotalSales, 1) OVER (ORDER BY SaleYear) IS NOT NULL
+ORDER BY SaleYear;
+
+-- Q24: Calculate the total Maintenance Cost (assuming an average cost of 5000 per request) for each Property that has over 2 requests.
+SELECT
+    pl.Title AS PropertyTitle,
+    COUNT(mr.RequestID) AS TotalRequests,
+    COUNT(mr.RequestID) * 5000.00 AS EstimatedTotalMaintenanceCost
+FROM MaintenanceRequests mr
+JOIN PropertyListings pl ON mr.PropertyID = pl.PropertyID
+GROUP BY pl.PropertyID, pl.Title
+HAVING TotalRequests > 2;
+
+-- Q25: Find the Employee (ManagerID in Projects) who has the highest percentage of their projects marked as 'Completed' versus 'Ongoing'.
+WITH ProjectCounts AS (
+    SELECT
+        ManagerID,
+        SUM(CASE WHEN Status = 'Completed' THEN 1 ELSE 0 END) AS CompletedProjects,
+        SUM(CASE WHEN Status = 'Ongoing' THEN 1 ELSE 0 END) AS OngoingProjects,
+        COUNT(ProjectID) AS TotalProjects
+    FROM Projects
+    GROUP BY ManagerID
+)
+SELECT
+    e.FullName AS EmployeeName,
+    pc.CompletedProjects,
+    pc.OngoingProjects,
+    (pc.CompletedProjects / pc.TotalProjects) * 100 AS CompletedPercentage
+FROM ProjectCounts pc
+JOIN Employees e ON pc.ManagerID = e.EmployeeID
+WHERE pc.TotalProjects > 0
+ORDER BY CompletedPercentage DESC
+LIMIT 1;
+
+-- Q26: Report the count of Inspections for each Site, showing the result of the *latest* inspection using a window function.
+WITH RankedInspections AS (
+    SELECT
+        SiteID,
+        Result,
+        InspectionDate,
+        ROW_NUMBER() OVER (PARTITION BY SiteID ORDER BY InspectionDate DESC) as rn
+    FROM Inspections
+)
+SELECT
+    s.Address AS SiteAddress,
+    COUNT(i.InspectionID) AS TotalInspections,
+    ri.Result AS LatestInspectionResult
+FROM Sites s
+LEFT JOIN Inspections i ON s.SiteID = i.SiteID
+LEFT JOIN RankedInspections ri ON s.SiteID = ri.SiteID AND ri.rn = 1
+GROUP BY s.SiteID, s.Address, ri.Result
+ORDER BY TotalInspections DESC;
+
+-- Q27: Identify properties where the RentAmount in an active Lease is higher than the average RentAmount for the same Property Type in the same City.
+WITH CityTypeAvgRent AS (
+    SELECT
+        pl.Type,
+        s.City,
+        AVG(l.RentAmount) AS AvgRent
+    FROM Leases l
+    JOIN PropertyListings pl ON l.PropertyID = pl.PropertyID
+    JOIN Projects p ON pl.ProjectID = p.ProjectID
+    JOIN Sites s ON p.ProjectID = s.ProjectID
+    GROUP BY pl.Type, s.City
+)
+SELECT
+    pl.Title AS PropertyTitle,
+    s.City,
+    pl.Type,
+    l.RentAmount,
+    ctar.AvgRent
+FROM Leases l
+JOIN PropertyListings pl ON l.PropertyID = pl.PropertyID
+JOIN Projects p ON pl.ProjectID = p.ProjectID
+JOIN Sites s ON p.ProjectID = s.ProjectID
+JOIN CityTypeAvgRent ctar ON pl.Type = ctar.Type AND s.City = ctar.City
+WHERE l.Status = 'Active' AND l.RentAmount > ctar.AvgRent
+ORDER BY l.RentAmount DESC;
+
+-- Q28: Find the average purchase order TotalCost for each Material Category that has orders approved by an Employee from the 'Procurement' department.
+SELECT
+    m.Category,
+    AVG(po.TotalCost) AS AverageOrderCost
 FROM PurchaseOrders po
 JOIN Materials m ON po.MaterialID = m.MaterialID
-WHERE ABS(po.TotalCost - (m.PricePerUnit * po.Quantity)) > 0.01;
+JOIN Employees e ON po.ApprovedBy = e.EmployeeID
+WHERE e.Department = 'Procurement'
+GROUP BY m.Category
+HAVING AVG(po.TotalCost) > 100000;
 
--- 27. Vendors who never got a PurchaseOrder
-SELECT * 
-FROM Vendors v
-LEFT JOIN PurchaseOrders po ON v.VendorID = po.VendorID
-WHERE po.OrderID IS NULL;
-
--- 28. Payments made (non-pending)
-SELECT * 
-FROM Payments
-WHERE Status <> 'Pending';
-
--- 29. Payments in last 7 days
-SELECT * 
-FROM Payments
-WHERE PaymentDate >= CURDATE() - INTERVAL 7 DAY;
-
--- 30. Payments for bank “HDFC Bank”
-SELECT * 
-FROM Payments
-WHERE BankName = 'HDFC Bank';
-
--- 31. Payment totals by SaleID
-SELECT SaleID, SUM(Amount) AS TotalPaid
-FROM Payments
-GROUP BY SaleID;
-
--- 32. Payment methods used and counts
-SELECT Method, COUNT(*) AS CountPayments
-FROM Payments
-GROUP BY Method;
-
--- 33. Payments sorted by amount descending
-SELECT * 
-FROM Payments
-ORDER BY Amount DESC;
-
--- 34. Payments where status is “Pending” but amount > 0
-SELECT * 
-FROM Payments
-WHERE Amount > 0 AND Status = 'Pending';
-
--- 35. Inspections scheduled in future (NextInspection > today)
-SELECT * 
-FROM Inspections
-WHERE NextInspection > CURDATE();
-
--- 36. Inspections failed
-SELECT * 
-FROM Inspections
-WHERE Result = 'Fail';
-
--- 37. Inspections by status “Delayed”
-SELECT * 
-FROM Inspections
-WHERE Status = 'Delayed';
-
--- 38. Inspections in last year
-SELECT * 
-FROM Inspections
-WHERE InspectionDate >= CURDATE() - INTERVAL 1 YEAR;
-
--- 39. Inspections done between dates
-SELECT * 
-FROM Inspections
-WHERE InspectionDate BETWEEN '2025-01-01' AND '2025-06-30';
-
--- 40. Inspections for SiteID = 4
-SELECT * 
-FROM Inspections
-WHERE SiteID = 4;
-
--- 41. Inspection counts per inspector
-SELECT InspectorName, COUNT(*) AS NumInspections
-FROM Inspections
-GROUP BY InspectorName;
-
--- 42. MaintenanceRequests pending
-SELECT * 
-FROM MaintenanceRequests
-WHERE Status = 'Pending';
-
--- 43. MaintenanceRequests completed in 2025
-SELECT * 
-FROM MaintenanceRequests
-WHERE CompletionDate BETWEEN '2025-01-01' AND '2025-12-31';
-
--- 44. MaintenanceRequests assigned to 9
-SELECT * 
-FROM MaintenanceRequests
-WHERE AssignedTo = 9;
-
--- 45. MaintenanceRequests unassigned (AssignedTo IS NULL)
-SELECT * 
-FROM MaintenanceRequests
-WHERE AssignedTo IS NULL;
-
--- 46. MaintenanceRequests older than 90 days (unresolved)
-SELECT * 
-FROM MaintenanceRequests
-WHERE RequestDate < CURDATE() - INTERVAL 90 DAY
-  AND Status <> 'Resolved';
-
--- 47. MaintenanceRequests where description contains “leak”
-SELECT * 
-FROM MaintenanceRequests
-WHERE Description LIKE '%leak%';
-
--- 48. MaintenanceRequests per property
-SELECT PropertyID, COUNT(*) AS CountRequests
-FROM MaintenanceRequests
-GROUP BY PropertyID;
-
--- 49. Clients with more than one maintenance request
-SELECT ClientID, COUNT(*) AS ReqCount
-FROM MaintenanceRequests
-GROUP BY ClientID
-HAVING COUNT(*) > 1;
-
--- 50. Leases active
-SELECT * 
-FROM Leases
-WHERE Status = 'Active';
-
--- 51. Leases expired (EndDate < today)
-SELECT * 
-FROM Leases
-WHERE EndDate < CURDATE();
-
--- 52. Leases expiring soon (within 30 days)
-SELECT * 
-FROM Leases
-WHERE EndDate BETWEEN CURDATE() AND CURDATE() + INTERVAL 30 DAY;
-
--- 53. Leases with no end date (NULL)
-SELECT * 
-FROM Leases
-WHERE EndDate IS NULL;
-
--- 54. Leases started before 2025
-SELECT * 
-FROM Leases
-WHERE StartDate < '2025-01-01';
-
--- 55. Leases where AgreementSigned = FALSE
-SELECT * 
-FROM Leases
-WHERE AgreementSigned = FALSE;
-
--- 56. Leases with deposit > 50000
-SELECT * 
-FROM Leases
-WHERE DepositAmount > 50000;
-
--- 57. Leases with rent between 10000 and 20000
-SELECT * 
-FROM Leases
-WHERE RentAmount BETWEEN 10000 AND 20000;
-
--- 58. Leases per client (count of leases)
-SELECT ClientID, COUNT(*) AS NumLeases
-FROM Leases
-GROUP BY ClientID;
-
--- 59. Leases ordered by deposit descending
-SELECT * 
-FROM Leases
-ORDER BY DepositAmount DESC;
-
--- 60. Leases where notes contain “lease”
-SELECT * 
-FROM Leases
-WHERE Notes LIKE '%lease%';
-
--- 61. Construction phases over budget (ActualCost > Budget)
-SELECT * 
-FROM ConstructionPhases
-WHERE ActualCost > Budget;
-
--- 62. Construction phases in progress
-SELECT * 
-FROM ConstructionPhases
-WHERE Status = 'In Progress';
-
--- 63. Phases not ended yet (EndDate IS NULL or > today)
-SELECT * 
-FROM ConstructionPhases
-WHERE EndDate IS NULL OR EndDate > CURDATE();
-
--- 64. Phases with budget > 200000
-SELECT * 
-FROM ConstructionPhases
-WHERE Budget > 200000;
-
--- 65. Phases with overlapping dates in same project
-SELECT cp1.*
-FROM ConstructionPhases cp1
-JOIN ConstructionPhases cp2 
-  ON cp1.ProjectID = cp2.ProjectID
-  AND cp1.PhaseID <> cp2.PhaseID
-WHERE cp1.StartDate < cp2.EndDate
-  AND cp2.StartDate < cp1.EndDate;
-
--- 66. Phases with NULL actual cost
-SELECT * 
-FROM ConstructionPhases
-WHERE ActualCost IS NULL;
-
--- 67. Phases with remarks containing “delay”
-SELECT * 
-FROM ConstructionPhases
-WHERE Remarks LIKE '%delay%';
-
--- 68. Phases by cost ratio descending (ActualCost/Budget)
-SELECT *, (ActualCost / Budget) AS CostRatio
-FROM ConstructionPhases
-WHERE Budget > 0
-ORDER BY CostRatio DESC;
-
--- 69. Tasks not yet completed
-SELECT * 
-FROM Tasks
-WHERE Status <> 'Completed';
-
--- 70. Tasks overdue (EndDate < today and not completed)
-SELECT * 
-FROM Tasks
-WHERE EndDate < CURDATE()
-  AND Status <> 'Completed';
-
--- 71. Tasks by priority = 'High'
-SELECT * 
-FROM Tasks
-WHERE Priority = 'High';
-
--- 72. Tasks with progress < 50%
-SELECT * 
-FROM Tasks
-WHERE ProgressPercent < 50;
-
--- 73. Tasks assigned to 301
-SELECT * 
-FROM Tasks
-WHERE AssignedTo = 301;
-
--- 74. Tasks unstarted (ProgressPercent = 0)
-SELECT * 
-FROM Tasks
-WHERE ProgressPercent = 0;
-
--- 75. Tasks overdue and unstarted
-SELECT * 
-FROM Tasks
-WHERE EndDate < CURDATE() AND ProgressPercent = 0;
-
--- 76. Tasks starting and ending on same day (zero duration)
-SELECT * 
-FROM Tasks
-WHERE StartDate = EndDate;
-
--- 77. Tasks whose StartDate > EndDate (data error)
-SELECT * 
-FROM Tasks
-WHERE StartDate > EndDate;
-
--- 78. Tasks in 2025
-SELECT * 
-FROM Tasks
-WHERE YEAR(StartDate) = 2025;
-
--- 79. Tasks ordered by priority then end date
-SELECT * 
-FROM Tasks
-ORDER BY FIELD(Priority, 'High','Medium','Low'), EndDate;
-
--- 80. Tasks with remarks containing “delay”
-SELECT * 
-FROM Tasks
-WHERE Remarks LIKE '%delay%';
-
--- 81. Tasks with NULL AssignedTo and not started
-SELECT * 
-FROM Tasks
-WHERE AssignedTo IS NULL
-  AND ProgressPercent = 0
-  AND Status <> 'Completed';
-
--- 82. Tasks with priority “Low” not completed
-SELECT * 
-FROM Tasks
-WHERE Priority = 'Low' AND Status <> 'Completed';
-
--- 83. Tasks with high priority and overdue
-SELECT * 
-FROM Tasks
-WHERE Priority = 'High'
-  AND EndDate < CURDATE()
-  AND Status <> 'Completed';
-
--- 84. Join example: Vendor + Materials supplied by them
-SELECT v.VendorID, v.CompanyName, m.MaterialID, m.Name AS MaterialName
-FROM Vendors v
-JOIN Materials m ON v.VendorID = m.SupplierID;
-
--- 85. Join example: PurchaseOrder + Material + Vendor
-SELECT po.OrderID, po.OrderDate, v.CompanyName, m.Name AS MaterialName, po.Quantity, po.TotalCost
-FROM PurchaseOrders po
-JOIN Vendors v ON po.VendorID = v.VendorID
-JOIN Materials m ON po.MaterialID = m.MaterialID;
-
--- 86. Join example: MaintenanceRequests + Leases (if property/lease relationship exists)
--- (Assume MaintenanceRequests.PropertyID = Leases.PropertyID)
-SELECT mr.RequestID, mr.Status, l.LeaseID, l.Status AS LeaseStatus
-FROM MaintenanceRequests mr
-LEFT JOIN Leases l ON mr.PropertyID = l.PropertyID;
-
--- 87. Subquery: Vendors whose supplied total cost > average total cost
-SELECT VendorID, SUM(TotalCost) AS Supplied
-FROM PurchaseOrders
-GROUP BY VendorID
-HAVING SUM(TotalCost) > (
-  SELECT AVG(total_cost_sub) FROM (
-    SELECT SUM(TotalCost) AS total_cost_sub
-    FROM PurchaseOrders
-    GROUP BY VendorID
-  ) AS sub
+-- Q29: Determine which Clients generated a lead, but their lead was 'Lost' and they have not registered any 'Completed' Sale since then.
+SELECT
+    c.FullName,
+    c.Email
+FROM Clients c
+WHERE c.ClientID IN (
+    -- Clients with a 'Lost' lead
+    SELECT ClientID
+    FROM Leads
+    WHERE Status = 'Lost'
+)
+AND c.ClientID NOT IN (
+    -- Clients with a 'Completed' sale
+    SELECT ClientID
+    FROM Sales
+    WHERE Status = 'Completed'
 );
 
--- 88. Subquery: Materials priced above average price
-SELECT * 
+-- Q30: Calculate the difference in average experience between Agents specializing in 'Luxury' and those specializing in 'Affordable Housing'.
+SELECT
+    ABS(
+        SUM(CASE WHEN Specialization = 'Luxury' THEN ExperienceYears ELSE 0 END) / SUM(CASE WHEN Specialization = 'Luxury' THEN 1 ELSE 0 END)
+        -
+        SUM(CASE WHEN Specialization = 'Affordable Housing' THEN ExperienceYears ELSE 0 END) / SUM(CASE WHEN Specialization = 'Affordable Housing' THEN 1 ELSE 0 END)
+    ) AS AvgExperienceDifference
+FROM Agents
+WHERE Specialization IN ('Luxury', 'Affordable Housing');
+
+-- Q31: Find the longest running Project (in days) that is currently 'Ongoing'.
+SELECT
+    Name AS ProjectName,
+    StartDate,
+    DATEDIFF(CURDATE(), StartDate) AS DaysOngoing
+FROM Projects
+WHERE Status = 'Ongoing'
+ORDER BY DaysOngoing DESC
+LIMIT 1;
+
+-- Q32: Determine the total number of unique Clients who visited a specific Site ('Skyline Residency') and subsequently had a 'Hot' lead status.
+SELECT
+    COUNT(DISTINCT c.ClientID) AS UniqueClients
+FROM Clients c
+JOIN Leads l ON c.ClientID = l.ClientID
+JOIN PropertyListings pl ON l.PropertyID = pl.PropertyID
+JOIN Projects p ON pl.ProjectID = p.ProjectID
+WHERE p.Name = 'Skyline Residency'
+AND l.Status = 'Hot'
+AND c.ClientID IN (
+    SELECT DISTINCT VisitorName -- Assuming visitor name in SiteVisits matches client full name
+    FROM SiteVisits sv
+    JOIN Sites s ON sv.SiteID = s.SiteID
+    JOIN Projects p2 ON s.ProjectID = p2.ProjectID
+    WHERE p2.Name = 'Skyline Residency'
+);
+
+-- Q33: Find the Material where the total ordered Quantity in the last year is less than the current StockQuantity.
+SELECT
+    m.Name AS MaterialName,
+    m.StockQuantity,
+    COALESCE(SUM(po.Quantity), 0) AS TotalQuantityOrderedLastYear
+FROM Materials m
+LEFT JOIN PurchaseOrders po ON m.MaterialID = po.MaterialID
+AND po.OrderDate >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+GROUP BY m.MaterialID, m.Name, m.StockQuantity
+HAVING m.StockQuantity > COALESCE(SUM(po.Quantity), 0);
+
+-- Q34: List all Invoices that are 'Pending' payment and are overdue (DueDate has passed).
+SELECT
+    i.InvoiceID,
+    v.CompanyName AS Vendor,
+    i.DueDate,
+    i.TotalAmount
+FROM Invoices i
+JOIN Vendors v ON i.VendorID = v.VendorID
+WHERE i.Status = 'Pending'
+AND i.DueDate < CURDATE();
+
+-- Q35: Report the average Rating of Contractors, weighted by the number of Maintenance Requests assigned to them.
+SELECT
+    c.Name AS ContractorName,
+    SUM(c.Rating * RequestCount) / SUM(RequestCount) AS WeightedAverageRating
+FROM Contractors c
+JOIN (
+    SELECT
+        AssignedTo,
+        COUNT(RequestID) AS RequestCount
+    FROM MaintenanceRequests
+    GROUP BY AssignedTo
+) mr_counts ON c.ContractorID = mr_counts.AssignedTo
+GROUP BY c.Name
+ORDER BY WeightedAverageRating DESC;
+
+-- Q36: Identify the top 2 sites with the highest number of 'Fail' inspection results and their percentage of failed inspections.
+WITH SiteInspectionCounts AS (
+    SELECT
+        SiteID,
+        COUNT(InspectionID) AS TotalInspections,
+        SUM(CASE WHEN Result = 'Fail' THEN 1 ELSE 0 END) AS FailedInspections
+    FROM Inspections
+    GROUP BY SiteID
+)
+SELECT
+    s.Address AS SiteAddress,
+    sic.FailedInspections,
+    sic.TotalInspections,
+    (sic.FailedInspections / sic.TotalInspections) * 100 AS FailureRate
+FROM Sites s
+JOIN SiteInspectionCounts sic ON s.SiteID = sic.SiteID
+WHERE sic.TotalInspections > 0
+ORDER BY FailureRate DESC
+LIMIT 2;
+
+-- Q37: Determine the Client who has the largest total DepositAmount across all their 'Active' Leases.
+SELECT
+    c.FullName AS ClientName,
+    SUM(l.DepositAmount) AS TotalDeposit
+FROM Clients c
+JOIN Leases l ON c.ClientID = l.ClientID
+WHERE l.Status = 'Active'
+GROUP BY c.FullName
+ORDER BY TotalDeposit DESC
+LIMIT 1;
+
+-- Q38: Calculate the cumulative Budget of construction phases for Project 1 ('Skyline Residency') ordered by Phase StartDate.
+SELECT
+    cp.PhaseName,
+    cp.StartDate,
+    cp.Budget,
+    SUM(cp.Budget) OVER (ORDER BY cp.StartDate) AS CumulativeBudget
+FROM ConstructionPhases cp
+JOIN Projects p ON cp.ProjectID = p.ProjectID
+WHERE p.Name = 'Skyline Residency'
+ORDER BY cp.StartDate;
+
+-- Q39: Find all properties with a listing price greater than the average final sale price of *all* completed sales.
+SELECT
+    pl.Title,
+    pl.Price
+FROM PropertyListings pl
+WHERE pl.Price > (
+    SELECT AVG(FinalPrice)
+    FROM Sales
+    WHERE Status = 'Completed'
+)
+ORDER BY pl.Price DESC;
+
+-- Q40: Identify employees whose Salary is in the top 10% of their respective Department's salaries.
+WITH DepartmentSalaryRanks AS (
+    SELECT
+        FullName,
+        Department,
+        Salary,
+        NTILE(10) OVER (PARTITION BY Department ORDER BY Salary DESC) as SalaryDecile
+    FROM Employees
+)
+SELECT
+    FullName,
+    Department,
+    Salary
+FROM DepartmentSalaryRanks
+WHERE SalaryDecile = 1
+ORDER BY Department, Salary DESC;
+
+-- Q41: Find the average number of days between the InquiryDate and FollowUpDate for 'Hot' versus 'Warm' leads.
+SELECT
+    Priority,
+    AVG(DATEDIFF(FollowUpDate, InquiryDate)) AS AvgDaysToFollowUp
+FROM Leads
+WHERE Priority IN ('Hot', 'Warm') AND FollowUpDate IS NOT NULL
+GROUP BY Priority;
+
+-- Q42: List the top 3 cities with the highest count of 'Residential' properties currently marked as 'Available'.
+SELECT
+    s.City,
+    COUNT(pl.PropertyID) AS AvailableResidentialCount
+FROM PropertyListings pl
+JOIN Projects p ON pl.ProjectID = p.ProjectID
+JOIN Sites s ON p.ProjectID = s.ProjectID
+WHERE pl.Type = 'Residential' AND pl.Status = 'Available'
+GROUP BY s.City
+ORDER BY AvailableResidentialCount DESC
+LIMIT 3;
+
+-- Q43: Determine the total number of times an Equipment item was 'In Maintenance' in the last calendar year.
+SELECT
+    e.Name AS EquipmentName,
+    SUM(CASE WHEN e.Status = 'In Maintenance' AND YEAR(e.MaintenanceDate) = YEAR(CURDATE() - INTERVAL 1 YEAR) THEN 1 ELSE 0 END) AS MaintenanceCountLastYear
+FROM Equipment e
+GROUP BY e.Name
+HAVING MaintenanceCountLastYear > 0;
+
+-- Q44: Calculate the running total of TotalCost for all Purchase Orders over time, grouped by Material Category.
+SELECT
+    po.OrderDate,
+    m.Category,
+    po.TotalCost,
+    SUM(po.TotalCost) OVER (
+        PARTITION BY m.Category
+        ORDER BY po.OrderDate
+    ) AS RunningTotalCost
+FROM PurchaseOrders po
+JOIN Materials m ON po.MaterialID = m.MaterialID
+ORDER BY m.Category, po.OrderDate;
+
+-- Q45: Identify all Agents who have at least one sale where the final price was less than 80% of the initial listing price.
+SELECT
+    DISTINCT a.Name AS AgentName,
+    a.Email
+FROM Agents a
+JOIN Sales s ON a.AgentID = s.AgentID
+JOIN PropertyListings pl ON s.PropertyID = pl.PropertyID
+WHERE s.FinalPrice < (0.8 * pl.Price)
+ORDER BY a.Name;
+
+-- Q46: Find the average Feedback Rating for properties in 'Mumbai' versus 'Pune'.
+SELECT
+    s.City,
+    AVG(f.Rating) AS AvgFeedbackRating
+FROM Feedback f
+JOIN PropertyListings pl ON f.PropertyID = pl.PropertyID
+JOIN Projects p ON pl.ProjectID = p.ProjectID
+JOIN Sites s ON p.ProjectID = s.ProjectID
+WHERE s.City IN ('Mumbai', 'Pune')
+GROUP BY s.City
+ORDER BY AvgFeedbackRating DESC;
+
+-- Q47: List all Construction Phases for 'Ongoing' projects that are currently past their scheduled EndDate.
+SELECT
+    p.Name AS ProjectName,
+    cp.PhaseName,
+    cp.EndDate
+FROM ConstructionPhases cp
+JOIN Projects p ON cp.ProjectID = p.ProjectID
+WHERE p.Status = 'Ongoing'
+AND cp.EndDate IS NOT NULL
+AND cp.EndDate < CURDATE()
+ORDER BY cp.EndDate;
+
+-- Q48: Calculate the total area (AreaSqFt) of all sites associated with each Contractor, based on the assumption that a contractor is assigned to all projects in the same city. (Complex assumption, using ProjectID instead)
+SELECT
+    c.Name AS ContractorName,
+    SUM(s.AreaSqFt) AS TotalSiteArea
+FROM Contractors c
+JOIN Projects p ON c.Specialization LIKE CONCAT('%', p.Type, '%') -- simplified matching
+JOIN Sites s ON p.ProjectID = s.ProjectID
+GROUP BY c.Name
+ORDER BY TotalSiteArea DESC;
+
+-- Q49: Determine the percentage of Sales that were processed using 'Bank Transfer' compared to all other payment modes.
+SELECT
+    SUM(CASE WHEN PaymentMode = 'Bank Transfer' THEN 1 ELSE 0 END) AS BankTransferSalesCount,
+    COUNT(SaleID) AS TotalSalesCount,
+    (SUM(CASE WHEN PaymentMode = 'Bank Transfer' THEN 1 ELSE 0 END) / COUNT(SaleID)) * 100 AS BankTransferPercent
+FROM Sales;
+
+-- Q50: Find the client who registered earliest but has the latest InquiryDate for a lead.
+SELECT
+    c.FullName,
+    c.RegistrationDate,
+    l.InquiryDate
+FROM Clients c
+JOIN Leads l ON c.ClientID = l.ClientID
+ORDER BY c.RegistrationDate ASC, l.InquiryDate DESC
+LIMIT 1;
+
+-- Q51: Calculate the average salary of Employees for each role and show which roles are paid above the company-wide average salary.
+SELECT
+    e.Role,
+    AVG(e.Salary) AS AvgRoleSalary
+FROM Employees e
+GROUP BY e.Role
+HAVING AVG(e.Salary) > (SELECT AVG(Salary) FROM Employees)
+ORDER BY AvgRoleSalary DESC;
+
+-- Q52: List all construction projects where at least 50% of the permits required have expired. (Assuming 3 standard permits per site: Building, Fire, Environmental)
+WITH ProjectPermitStatus AS (
+    SELECT
+        p.ProjectID,
+        p.Name,
+        COUNT(pt.PermitID) AS TotalPermits,
+        SUM(CASE WHEN pt.ExpiryDate < CURDATE() THEN 1 ELSE 0 END) AS ExpiredPermits
+    FROM Projects p
+    JOIN Sites s ON p.ProjectID = s.ProjectID
+    LEFT JOIN Permits pt ON s.SiteID = pt.SiteID
+    GROUP BY p.ProjectID, p.Name
+)
+SELECT
+    Name AS ProjectName,
+    TotalPermits,
+    ExpiredPermits
+FROM ProjectPermitStatus
+WHERE (ExpiredPermits / TotalPermits) >= 0.5;
+
+-- Q53: Find all Material IDs for materials that were ordered at least twice in a single Purchase Order (by the same Vendor) but delivered late (DeliveryDate > DueDate in Invoices).
+SELECT
+    DISTINCT po.MaterialID
+FROM PurchaseOrders po
+JOIN Invoices i ON po.OrderID = i.OrderID
+WHERE po.Quantity >= 2
+AND i.DeliveryDate > i.DueDate; -- Note: PurchaseOrders table has DeliveryDate, not Invoices. Assuming a logic mismatch or simplified join. Use PurchaseOrders.DeliveryDate.
+-- Corrected:
+SELECT
+    DISTINCT po.MaterialID
+FROM PurchaseOrders po
+WHERE po.Quantity >= 2
+AND po.DeliveryDate > DATE_ADD(po.OrderDate, INTERVAL 15 DAY); -- Assuming 15 days is standard delivery time.
+
+-- Q54: Determine the Property that has the highest ratio of (Sale Price / AreaSqFt).
+SELECT
+    pl.Title,
+    s.FinalPrice / pl.Area AS PricePerSqFt
+FROM PropertyListings pl
+JOIN Sales s ON pl.PropertyID = s.PropertyID
+WHERE s.Status = 'Completed'
+ORDER BY PricePerSqFt DESC
+LIMIT 1;
+
+-- Q55: Rank Agents based on their total sales in the last 3 months, and show how their sales compare to the highest earner in that period.
+WITH AgentRecentSales AS (
+    SELECT
+        a.AgentID,
+        a.Name,
+        SUM(s.FinalPrice) AS TotalSales
+    FROM Agents a
+    JOIN Sales s ON a.AgentID = s.AgentID
+    WHERE s.SaleDate >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+    GROUP BY a.AgentID, a.Name
+)
+SELECT
+    ars.Name,
+    ars.TotalSales,
+    RANK() OVER (ORDER BY ars.TotalSales DESC) AS SalesRank,
+    ars.TotalSales / MAX(ars.TotalSales) OVER () * 100 AS PercentOfTopEarner
+FROM AgentRecentSales ars
+ORDER BY SalesRank;
+
+-- Q56: Identify the top 5 longest-standing vendors (by registration date/ID) that have not been used in a Purchase Order in the last year.
+SELECT
+    v.CompanyName,
+    v.VendorID
+FROM Vendors v
+WHERE v.VendorID NOT IN (
+    SELECT DISTINCT VendorID
+    FROM PurchaseOrders
+    WHERE OrderDate >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+)
+ORDER BY v.VendorID ASC -- Assuming lower ID means earlier standing
+LIMIT 5;
+
+-- Q57: Find the Project Manager whose projects collectively have the highest total number of 'High' priority tasks.
+SELECT
+    e.FullName AS ProjectManager,
+    COUNT(t.TaskID) AS HighPriorityTaskCount
+FROM Employees e
+JOIN Projects p ON e.EmployeeID = p.ManagerID
+JOIN ConstructionPhases cp ON p.ProjectID = cp.ProjectID
+JOIN Tasks t ON cp.PhaseID = t.PhaseID
+WHERE t.Priority = 'High'
+GROUP BY e.FullName
+ORDER BY HighPriorityTaskCount DESC
+LIMIT 1;
+
+-- Q58: Report the average quantity of Materials that are currently marked as 'Low Stock' versus 'In Stock'.
+SELECT
+    Status,
+    AVG(StockQuantity) AS AvgStockQuantity
 FROM Materials
-WHERE PricePerUnit > (
-  SELECT AVG(PricePerUnit) FROM Materials
+WHERE Status IN ('Low Stock', 'In Stock')
+GROUP BY Status;
+
+-- Q59: List all Clients who have given a Rating of 5 but whose Agent (the one who handled the sale) has an overall rating less than 4.5.
+SELECT
+    c.FullName AS ClientName,
+    a.Name AS AgentName,
+    a.Rating AS AgentRating
+FROM Feedback f
+JOIN Clients c ON f.ClientID = c.ClientID
+JOIN Agents a ON f.AgentID = a.AgentID
+WHERE f.Rating = 5
+AND a.Rating < 4.5;
+
+-- Q60: Compare the total Sale FinalPrice from Residential vs Commercial properties in Pune vs Mumbai. (Conditional Aggregation)
+SELECT
+    SUM(CASE WHEN s.City = 'Pune' AND pl.Type = 'Residential' THEN s.FinalPrice ELSE 0 END) AS Pune_Residential_Sales,
+    SUM(CASE WHEN s.City = 'Mumbai' AND pl.Type = 'Residential' THEN s.FinalPrice ELSE 0 END) AS Mumbai_Residential_Sales,
+    SUM(CASE WHEN s.City = 'Pune' AND pl.Type = 'Commercial' THEN s.FinalPrice ELSE 0 END) AS Pune_Commercial_Sales,
+    SUM(CASE WHEN s.City = 'Mumbai' AND pl.Type = 'Commercial' THEN s.FinalPrice ELSE 0 END) AS Mumbai_Commercial_Sales
+FROM Sales s
+JOIN PropertyListings pl ON s.PropertyID = pl.PropertyID
+JOIN Projects p ON pl.ProjectID = p.ProjectID
+JOIN Sites s ON p.ProjectID = s.ProjectID
+WHERE s.City IN ('Pune', 'Mumbai') AND pl.Type IN ('Residential', 'Commercial');
+
+-- Q61: Identify the property with the highest number of associated Legal Documents that are set to expire in the next 12 months.
+SELECT
+    pl.Title,
+    COUNT(ld.DocumentID) AS ExpiringDocumentCount
+FROM PropertyListings pl
+JOIN LegalDocuments ld ON pl.PropertyID = ld.PropertyID
+WHERE ld.ExpiryDate BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 1 YEAR)
+GROUP BY pl.Title
+ORDER BY ExpiringDocumentCount DESC
+LIMIT 1;
+
+-- Q62: Calculate the difference between the average property listing price in projects managed by Employee 3 versus those managed by Employee 5.
+SELECT
+    ABS(
+        SUM(CASE WHEN p.ManagerID = 3 THEN pl.Price ELSE 0 END) / SUM(CASE WHEN p.ManagerID = 3 THEN 1 ELSE 0 END)
+        -
+        SUM(CASE WHEN p.ManagerID = 5 THEN pl.Price ELSE 0 END) / SUM(CASE WHEN p.ManagerID = 5 THEN 1 ELSE 0 END)
+    ) AS AvgPriceDifference
+FROM Projects p
+JOIN PropertyListings pl ON p.ProjectID = pl.ProjectID
+WHERE p.ManagerID IN (3, 5);
+
+-- Q63: Create a pivot-like report counting the number of properties sold by each Agent, broken down by payment mode.
+SELECT
+    a.Name AS AgentName,
+    SUM(CASE WHEN s.PaymentMode = 'Bank Transfer' THEN 1 ELSE 0 END) AS BankTransferSales,
+    SUM(CASE WHEN s.PaymentMode = 'Cheque' THEN 1 ELSE 0 END) AS ChequeSales,
+    SUM(CASE WHEN s.PaymentMode = 'Cash' THEN 1 ELSE 0 END) AS CashSales,
+    SUM(CASE WHEN s.PaymentMode = 'Online' THEN 1 ELSE 0 END) AS OnlineSales,
+    COUNT(s.SaleID) AS TotalSales
+FROM Agents a
+JOIN Sales s ON a.AgentID = s.AgentID
+GROUP BY a.Name
+ORDER BY TotalSales DESC;
+
+-- Q64: List the Construction Phases where the actual cost exceeded the budget by more than 5%.
+SELECT
+    p.Name AS ProjectName,
+    cp.PhaseName,
+    cp.Budget,
+    cp.ActualCost,
+    ((cp.ActualCost - cp.Budget) / cp.Budget) * 100 AS OverBudgetPercent
+FROM ConstructionPhases cp
+JOIN Projects p ON cp.ProjectID = p.ProjectID
+WHERE cp.ActualCost > cp.Budget * 1.05
+AND cp.Budget IS NOT NULL AND cp.Budget > 0;
+
+-- Q65: Use LAG to find the average time (in days) between consecutive Site Visits for SiteID 1.
+WITH LaggedVisits AS (
+    SELECT
+        VisitDate,
+        LAG(VisitDate, 1) OVER (ORDER BY VisitDate) AS PreviousVisitDate
+    FROM SiteVisits
+    WHERE SiteID = 1
+)
+SELECT
+    AVG(DATEDIFF(VisitDate, PreviousVisitDate)) AS AvgDaysBetweenVisits
+FROM LaggedVisits
+WHERE PreviousVisitDate IS NOT NULL;
+
+-- Q66: Identify all Contractors who have been assigned to maintenance requests for more than one unique Project Type.
+SELECT
+    c.Name AS ContractorName,
+    GROUP_CONCAT(DISTINCT p.Type) AS ProjectTypes,
+    COUNT(DISTINCT p.Type) AS UniqueProjectTypeCount
+FROM Contractors c
+JOIN MaintenanceRequests mr ON c.ContractorID = mr.AssignedTo
+JOIN PropertyListings pl ON mr.PropertyID = pl.PropertyID
+JOIN Projects p ON pl.ProjectID = p.ProjectID
+GROUP BY c.Name
+HAVING UniqueProjectTypeCount > 1;
+
+-- Q67: Find the property listings where the price is between the 25th percentile and the 75th percentile of all residential property prices.
+WITH PriceRanks AS (
+    SELECT
+        Price,
+        NTILE(4) OVER (ORDER BY Price) AS Quartile
+    FROM PropertyListings
+    WHERE Type = 'Residential'
+)
+SELECT
+    pl.Title,
+    pl.Price
+FROM PropertyListings pl
+WHERE pl.Type = 'Residential'
+AND pl.Price BETWEEN (SELECT MIN(Price) FROM PriceRanks WHERE Quartile = 2)
+              AND (SELECT MAX(Price) FROM PriceRanks WHERE Quartile = 3);
+
+-- Q68: Calculate the cumulative percentage of the total budget consumed by projects, ordered by Project Start Date.
+WITH ProjectBudgets AS (
+    SELECT
+        ProjectID,
+        Name,
+        StartDate,
+        Budget,
+        SUM(Budget) OVER () AS TotalBudget
+    FROM Projects
+)
+SELECT
+    Name AS ProjectName,
+    Budget,
+    (SUM(Budget) OVER (ORDER BY StartDate) / TotalBudget) * 100 AS CumulativeBudgetPercent
+FROM ProjectBudgets
+ORDER BY StartDate;
+
+-- Q69: Find all properties where no Lead was created before the SaleDate (i.e., immediate sale without lead tracking).
+SELECT
+    pl.Title,
+    s.SaleDate
+FROM PropertyListings pl
+JOIN Sales s ON pl.PropertyID = s.PropertyID
+LEFT JOIN Leads l ON pl.PropertyID = l.PropertyID
+GROUP BY pl.PropertyID, pl.Title, s.SaleDate
+HAVING MAX(l.InquiryDate) IS NULL OR MAX(l.InquiryDate) > s.SaleDate
+ORDER BY s.SaleDate;
+
+-- Q70: Determine the average Salary of Employees who are supervised by a Manager whose Department is 'Sales'.
+SELECT
+    AVG(e.Salary) AS AvgEmployeeSalary
+FROM Employees e
+JOIN Employees m ON e.ManagerID = m.EmployeeID
+WHERE m.Department = 'Sales';
+
+-- Q71: Create a View: `V_ProjectFinancialSummary` to show Project Name, Total Budget, Total Actual Cost, and Total Sales Revenue.
+CREATE VIEW V_ProjectFinancialSummary AS
+SELECT
+    p.Name AS ProjectName,
+    p.Budget AS ProjectBudget,
+    COALESCE(SUM(cp.ActualCost), 0.00) AS TotalActualConstructionCost,
+    COALESCE(SUM(s.FinalPrice), 0.00) AS TotalSalesRevenue
+FROM Projects p
+LEFT JOIN ConstructionPhases cp ON p.ProjectID = cp.ProjectID
+LEFT JOIN PropertyListings pl ON p.ProjectID = pl.ProjectID
+LEFT JOIN Sales s ON pl.PropertyID = s.PropertyID AND s.Status = 'Completed'
+GROUP BY p.ProjectID, p.Name, p.Budget;
+-- Query the View
+SELECT * FROM V_ProjectFinancialSummary;
+
+-- Q72: Create a View: `V_AgentPerformanceMetric` to rank Agents by total commission and show their highest single sale price.
+CREATE VIEW V_AgentPerformanceMetric AS
+WITH AgentCommission AS (
+    SELECT
+        a.AgentID,
+        a.Name,
+        SUM(s.FinalPrice * (a.CommissionRate / 100)) AS TotalCommission
+    FROM Agents a
+    JOIN Sales s ON a.AgentID = s.AgentID
+    GROUP BY a.AgentID, a.Name
+)
+SELECT
+    ac.Name AS AgentName,
+    ac.TotalCommission,
+    MAX(s.FinalPrice) AS HighestSingleSale,
+    RANK() OVER (ORDER BY ac.TotalCommission DESC) AS CommissionRank
+FROM AgentCommission ac
+JOIN Sales s ON s.AgentID = ac.AgentID
+GROUP BY ac.AgentID, ac.Name, ac.TotalCommission
+ORDER BY CommissionRank;
+-- Query the View
+SELECT * FROM V_AgentPerformanceMetric;
+
+-- Q73: Find the total number of distinct properties that have a maintenance request and an expired legal document.
+SELECT
+    COUNT(DISTINCT pl.PropertyID) AS ProblemPropertiesCount
+FROM PropertyListings pl
+WHERE pl.PropertyID IN (
+    SELECT DISTINCT PropertyID
+    FROM MaintenanceRequests
+)
+AND pl.PropertyID IN (
+    SELECT DISTINCT PropertyID
+    FROM LegalDocuments
+    WHERE ExpiryDate < CURDATE()
 );
 
--- 89. Correlated subquery: For each vendor, count number of materials they supply
-SELECT v.VendorID, v.CompanyName,
-  (SELECT COUNT(*) FROM Materials m WHERE m.SupplierID = v.VendorID) AS NumMaterials
-FROM Vendors v;
+-- Q74: List the Project Name, Site Address, and the number of days until the NextInspection date, only for sites with an 'Ongoing' project status.
+SELECT
+    p.Name AS ProjectName,
+    s.Address AS SiteAddress,
+    i.NextInspection,
+    DATEDIFF(i.NextInspection, CURDATE()) AS DaysUntilNextInspection
+FROM Projects p
+JOIN Sites s ON p.ProjectID = s.ProjectID
+JOIN Inspections i ON s.SiteID = i.SiteID
+WHERE p.Status = 'Ongoing'
+ORDER BY DaysUntilNextInspection;
 
--- 90. Correlated subquery: Purchase orders for vendor with highest sum
-SELECT * 
-FROM PurchaseOrders po
-WHERE po.VendorID = (
-  SELECT VendorID
-  FROM (
-    SELECT VendorID, SUM(TotalCost) AS tot
-    FROM PurchaseOrders
-    GROUP BY VendorID
-    ORDER BY tot DESC
-    LIMIT 1
-  ) AS best
-);
-
--- 91. Update: Mark a vendor status to “Inactive” for low rating
-UPDATE Vendors
-SET Status = 'Inactive'
-WHERE Rating < 3.0;
-
--- 92. Update: Increase price per unit by 5% for materials in category “Finishing”
-UPDATE Materials
-SET PricePerUnit = PricePerUnit * 1.05
-WHERE Category = 'Finishing';
-
--- 93. Delete: Remove purchase orders that have zero quantity
-DELETE FROM PurchaseOrders
-WHERE Quantity = 0;
-
--- 94. Delete: Remove materials with zero stock and price = 0 (anomalous)
-DELETE FROM Materials
-WHERE StockQuantity = 0
-  AND PricePerUnit = 0;
-
--- 95. Insert: Add a new vendor
-INSERT INTO Vendors (VendorID, CompanyName, ContactName, Email, Phone, Address, ServiceType, Rating, GSTNumber, Status)
-VALUES (221, 'NewVendor Co.', 'Rohit Kumar', 'rohit@newvendor.com', '9800000000', 'Pune', 'Wood', 4.1, 'GSTIN12365', 'Approved');
-
--- 96. Insert: Add a new material
-INSERT INTO Materials (MaterialID, Name, Category, Unit, PricePerUnit, StockQuantity, SupplierID, LastUpdated, Status, Remarks)
-VALUES (21, 'Fiber Cement', 'Construction', 'Sheets', 550.00, 200.00, 221, '2025-07-01', 'Available', 'New product');
-
--- 97. Insert: New purchase order
-INSERT INTO PurchaseOrders (OrderID, VendorID, MaterialID, OrderDate, DeliveryDate, Quantity, TotalCost, Status, ApprovedBy, Notes)
-VALUES (21, 221, 21, '2025-07-10', NULL, 50.00, 27500.00, 'Pending', 105, 'For upcoming site');
-
--- 98. Transaction example: payment + order update (in a transaction block)
-START TRANSACTION;
-  INSERT INTO Payments (PaymentID, SaleID, Amount, PaymentDate, Method, Status, TransactionID, BankName, ReceivedBy, Remarks)
-    VALUES (21, 21, 27500.00, CURDATE(), 'Bank Transfer', 'Completed', 'TXN2001', 'HDFC Bank', 1, 'Payment for PO21');
-  UPDATE PurchaseOrders
-    SET Status = 'Paid'
-    WHERE OrderID = 21;
-COMMIT;
-
--- 99. Create a view: vendor material summary
-CREATE OR REPLACE VIEW VendorMaterialSummary AS
-SELECT v.VendorID, v.CompanyName, COUNT(m.MaterialID) AS MaterialCount, COALESCE(SUM(po.TotalCost), 0) AS TotalSupplied
+-- Q75: Calculate the average rating of Vendors, weighted by the total cost of materials purchased from them.
+SELECT
+    v.CompanyName,
+    SUM(v.Rating * po.TotalCost) / SUM(po.TotalCost) AS WeightedAverageRating
 FROM Vendors v
-LEFT JOIN Materials m ON v.VendorID = m.SupplierID
-LEFT JOIN PurchaseOrders po ON po.VendorID = v.VendorID
-GROUP BY v.VendorID, v.CompanyName;
+JOIN PurchaseOrders po ON v.VendorID = po.VendorID
+GROUP BY v.CompanyName
+ORDER BY WeightedAverageRating DESC;
 
--- 100. Query the view
-SELECT * FROM VendorMaterialSummary;
+-- Q76: Find the property listing with the lowest price that is on a floor higher than the average floor of all 'Residential' properties.
+SELECT
+    pl.Title,
+    pl.Price,
+    pl.Floor
+FROM PropertyListings pl
+WHERE pl.Type = 'Residential'
+AND pl.Floor > (
+    SELECT AVG(Floor) FROM PropertyListings WHERE Type = 'Residential'
+)
+ORDER BY pl.Price ASC
+LIMIT 1;
 
+-- Q77: List all ConstructionPhases that have tasks with a 'Completed' status but the phase itself is still marked as 'Ongoing'.
+SELECT
+    p.Name AS ProjectName,
+    cp.PhaseName,
+    COUNT(t.TaskID) AS CompletedTasksInOngoingPhase
+FROM ConstructionPhases cp
+JOIN Projects p ON cp.ProjectID = p.ProjectID
+JOIN Tasks t ON cp.PhaseID = t.PhaseID
+WHERE cp.Status = 'Ongoing'
+AND t.Status = 'Completed'
+GROUP BY p.Name, cp.PhaseName
+HAVING CompletedTasksInOngoingPhase > 0;
+
+-- Q78: Identify Clients who have registered in the last 6 months and whose Preferred Property Type is 'Residential' but have only inquired about 'Commercial' properties in their leads.
+SELECT
+    c.FullName,
+    c.PreferredType
+FROM Clients c
+WHERE c.RegistrationDate >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+AND c.PreferredType = 'Residential'
+AND c.ClientID IN (
+    SELECT DISTINCT l.ClientID
+    FROM Leads l
+    JOIN PropertyListings pl ON l.PropertyID = pl.PropertyID
+    WHERE pl.Type = 'Commercial'
+)
+AND c.ClientID NOT IN (
+    SELECT DISTINCT l.ClientID
+    FROM Leads l
+    JOIN PropertyListings pl ON l.PropertyID = pl.PropertyID
+    WHERE pl.Type = 'Residential'
+);
+
+-- Q79: Calculate the moving average of the area of properties listed, using a 3-property window ordered by listing price.
+SELECT
+    Title,
+    Price,
+    Area,
+    AVG(Area) OVER (ORDER BY Price ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS MovingAvgArea
+FROM PropertyListings
+ORDER BY Price;
+
+-- Q80: Find all projects where the latest site inspection result was 'Fail' and the project status is 'Completed'.
+WITH LatestInspection AS (
+    SELECT
+        s.ProjectID,
+        i.Result,
+        ROW_NUMBER() OVER (PARTITION BY s.ProjectID ORDER BY i.InspectionDate DESC) as rn
+    FROM Inspections i
+    JOIN Sites s ON i.SiteID = s.SiteID
+)
+SELECT
+    p.Name AS ProjectName,
+    li.Result AS LatestResult
+FROM Projects p
+JOIN LatestInspection li ON p.ProjectID = li.ProjectID
+WHERE p.Status = 'Completed'
+AND li.rn = 1
+AND li.Result = 'Fail';
+
+-- Q81: Stored Procedure: Update project status to 'Delayed' if the EndDate is past due and Status is 'Ongoing'.
+DELIMITER //
+CREATE PROCEDURE UpdateDelayedProjects()
+BEGIN
+    UPDATE Projects
+    SET Status = 'Delayed'
+    WHERE Status = 'Ongoing' AND EndDate < CURDATE();
+END //
+DELIMITER ;
+-- Call the procedure
+CALL UpdateDelayedProjects();
+SELECT ProjectID, Name, Status FROM Projects WHERE Status = 'Delayed';
+
+-- Q82: Stored Function: Calculate the potential commission for a given SaleID.
+DELIMITER //
+CREATE FUNCTION CalculateCommission(sale_id INT)
+RETURNS DECIMAL(10,2) READS SQL DATA
+BEGIN
+    DECLARE commission_amount DECIMAL(10,2);
+    SELECT s.FinalPrice * (a.CommissionRate / 100) INTO commission_amount
+    FROM Sales s
+    JOIN Agents a ON s.AgentID = a.AgentID
+    WHERE s.SaleID = sale_id;
+    RETURN commission_amount;
+END //
+DELIMITER ;
+-- Query the function
+SELECT CalculateCommission(1) AS CommissionForSale1;
+
+-- Q83: Stored Procedure: Insert a new lead, and update the assigned agent's status to 'Busy' if they have > 5 'Hot' leads.
+DELIMITER //
+CREATE PROCEDURE InsertNewLeadAndCheckAgent(
+    p_ClientID INT, p_PropertyID INT, p_Source VARCHAR(50), p_AssignedAgentID INT, p_Notes TEXT
+)
+BEGIN
+    DECLARE hot_lead_count INT;
+    INSERT INTO Leads (LeadID, ClientID, PropertyID, Source, Status, AssignedAgentID, InquiryDate, Priority, Notes)
+    VALUES ((SELECT COALESCE(MAX(LeadID), 0) + 1 FROM Leads), p_ClientID, p_PropertyID, p_Source, 'Hot', p_AssignedAgentID, CURDATE(), 'High', p_Notes);
+
+    SELECT COUNT(*) INTO hot_lead_count
+    FROM Leads
+    WHERE AssignedAgentID = p_AssignedAgentID AND Status = 'Hot';
+
+    IF hot_lead_count > 5 THEN
+        UPDATE Agents SET Status = 'Busy' WHERE AgentID = p_AssignedAgentID;
+    END IF;
+END //
+DELIMITER ;
+-- Mock call (will fail due to ID checks unless manually prepared, but query is complex)
+SELECT 'Procedure created' AS Status;
+
+-- Q84: Trigger: Automatically set a Task Status to 'Overdue' if EndDate is reached and ProgressPercent is < 100. (Need a scheduled event or cron job in real life, but the trigger logic is complex.)
+-- MySQL event scheduler is preferred for time-based checks, but for a one-time script, we define the trigger logic for an UPDATE.
+DELIMITER //
+CREATE TRIGGER before_task_update
+BEFORE UPDATE ON Tasks
+FOR EACH ROW
+BEGIN
+    IF NEW.EndDate < CURDATE() AND NEW.ProgressPercent < 100 AND OLD.Status != 'Overdue' THEN
+        SET NEW.Status = 'Overdue';
+    END IF;
+END //
+DELIMITER ;
+SELECT 'Trigger created' AS Status;
+
+-- Q85: Trigger: Before deleting a Contractor, check if they have any 'Pending' Maintenance Requests and prevent deletion if so.
+DELIMITER //
+CREATE TRIGGER before_contractor_delete
+BEFORE DELETE ON Contractors
+FOR EACH ROW
+BEGIN
+    DECLARE pending_requests INT;
+    SELECT COUNT(*) INTO pending_requests
+    FROM MaintenanceRequests
+    WHERE AssignedTo = OLD.ContractorID AND Status = 'Pending';
+
+    IF pending_requests > 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Cannot delete contractor: Pending maintenance requests exist.';
+    END IF;
+END //
+DELIMITER ;
+SELECT 'Trigger created' AS Status;
+
+-- Q86: Find the average price of 'Residential' properties facing 'East' versus all other residential properties.
+SELECT
+    AVG(CASE WHEN Facing = 'East' THEN Price ELSE NULL END) AS AvgPrice_East_Facing,
+    AVG(CASE WHEN Facing != 'East' THEN Price ELSE NULL END) AS AvgPrice_Other_Facing
+FROM PropertyListings
+WHERE Type = 'Residential';
+
+-- Q87: List all Employees who are either a 'Project Head' OR earn more than their direct Manager. (Self Join and OR condition)
+SELECT
+    e.FullName AS EmployeeName,
+    e.Role,
+    e.Salary
+FROM Employees e
+LEFT JOIN Employees m ON e.ManagerID = m.EmployeeID
+WHERE e.Role = 'Project Head'
+OR e.Salary > m.Salary;
+
+-- Q88: Use a correlated subquery to find the name of the Project that has the highest budget for a Construction Phase in each specific year.
+SELECT
+    p.Name AS ProjectName,
+    p.Location,
+    cp.PhaseName,
+    cp.Budget,
+    YEAR(cp.StartDate) AS PhaseYear
+FROM Projects p
+JOIN ConstructionPhases cp ON p.ProjectID = cp.ProjectID
+WHERE cp.Budget = (
+    SELECT MAX(Budget)
+    FROM ConstructionPhases
+    WHERE YEAR(StartDate) = YEAR(cp.StartDate)
+)
+ORDER BY PhaseYear DESC, cp.Budget DESC;
+
+-- Q89: Find all Invoices whose TotalAmount is within one standard deviation of the average TotalAmount for all paid Invoices.
+WITH PaidInvoiceStats AS (
+    SELECT
+        AVG(TotalAmount) AS AvgAmount,
+        STDDEV(TotalAmount) AS StdDevAmount
+    FROM Invoices
+    WHERE Status = 'Paid'
+)
+SELECT
+    i.InvoiceID,
+    i.TotalAmount
+FROM Invoices i, PaidInvoiceStats pis
+WHERE i.TotalAmount BETWEEN (pis.AvgAmount - pis.StdDevAmount) AND (pis.AvgAmount + pis.StdDevAmount)
+ORDER BY i.TotalAmount;
+
+-- Q90: Calculate the percentage of total Project Budget that is allocated to each Construction Phase for a given Project (e.g., ProjectID 1).
+SELECT
+    cp.PhaseName,
+    cp.Budget AS PhaseBudget,
+    p.Budget AS ProjectTotalBudget,
+    (cp.Budget / p.Budget) * 100 AS BudgetAllocationPercent
+FROM ConstructionPhases cp
+JOIN Projects p ON cp.ProjectID = p.ProjectID
+WHERE p.ProjectID = 1
+ORDER BY BudgetAllocationPercent DESC;
+
+-- Q91: Calculate the total time (in days) spent on 'Completed' Maintenance Requests, grouped by the assigned Contractor.
+SELECT
+    c.Name AS ContractorName,
+    SUM(DATEDIFF(mr.CompletionDate, mr.RequestDate)) AS TotalDaysSpent
+FROM Contractors c
+JOIN MaintenanceRequests mr ON c.ContractorID = mr.AssignedTo
+WHERE mr.Status = 'Completed'
+GROUP BY c.Name
+ORDER BY TotalDaysSpent DESC;
+
+-- Q92: Find the Site that has the highest number of different Equipment Types currently assigned to it.
+SELECT
+    s.Address AS SiteAddress,
+    COUNT(DISTINCT e.Type) AS UniqueEquipmentTypes
+FROM Sites s
+JOIN Equipment e ON s.SiteID = e.AssignedToSite
+GROUP BY s.Address
+ORDER BY UniqueEquipmentTypes DESC
+LIMIT 1;
+
+-- Q93: Use NTILE to divide clients into 4 quartiles based on the total value of their completed sales.
+WITH ClientSales AS (
+    SELECT
+        c.FullName,
+        SUM(s.FinalPrice) AS TotalSalesValue
+    FROM Clients c
+    JOIN Sales s ON c.ClientID = s.ClientID
+    WHERE s.Status = 'Completed'
+    GROUP BY c.FullName
+)
+SELECT
+    FullName,
+    TotalSalesValue,
+    NTILE(4) OVER (ORDER BY TotalSalesValue DESC) AS SalesQuartile
+FROM ClientSales
+ORDER BY SalesQuartile, TotalSalesValue DESC;
+
+-- Q94: Identify the Projects where the average inspection result for their sites is 'Pass' (i.e., all completed inspections resulted in 'Pass').
+SELECT
+    p.Name AS ProjectName
+FROM Projects p
+JOIN Sites s ON p.ProjectID = s.ProjectID
+JOIN Inspections i ON s.SiteID = i.SiteID
+GROUP BY p.ProjectID, p.Name
+HAVING SUM(CASE WHEN i.Result != 'Pass' THEN 1 ELSE 0 END) = 0
+AND COUNT(i.InspectionID) > 0; -- Ensure there is at least one completed inspection
+
+-- Q95: Find the Agent who has the highest Lead-to-Sale Conversion Rate (Completed Sales / Total Leads assigned).
+WITH AgentPerformance AS (
+    SELECT
+        a.AgentID,
+        a.Name,
+        COUNT(DISTINCT l.LeadID) AS TotalLeads,
+        COUNT(DISTINCT s.SaleID) AS CompletedSales
+    FROM Agents a
+    LEFT JOIN Leads l ON a.AgentID = l.AssignedAgentID
+    LEFT JOIN Sales s ON a.AgentID = s.AgentID AND s.Status = 'Completed'
+    GROUP BY a.AgentID, a.Name
+)
+SELECT
+    Name AS AgentName,
+    TotalLeads,
+    CompletedSales,
+    (CompletedSales / TotalLeads) * 100 AS ConversionRate
+FROM AgentPerformance
+WHERE TotalLeads > 0
+ORDER BY ConversionRate DESC
+LIMIT 1;
+
+-- Q96: Calculate the maximum price difference between any two properties within the same Project Type.
+SELECT
+    p.Type AS ProjectType,
+    MAX(pl.Price) - MIN(pl.Price) AS MaxPriceDifference
+FROM Projects p
+JOIN PropertyListings pl ON p.ProjectID = pl.ProjectID
+GROUP BY p.Type
+HAVING COUNT(pl.PropertyID) > 1 -- Only consider types with more than one property
+ORDER BY MaxPriceDifference DESC;
+
+-- Q97: Create a complex index on the Sales table to optimize queries filtering by SaleDate, AgentID, and sorting by FinalPrice.
+CREATE INDEX idx_sales_date_agent_price ON Sales (SaleDate, AgentID, FinalPrice DESC);
+
+-- Q98: Find the average price per square foot (Price / Area) for residential properties on floors 1-3 vs floors 4 and above. (Conditional aggregation)
+SELECT
+    AVG(CASE WHEN Floor BETWEEN 1 AND 3 THEN Price / Area ELSE NULL END) AS AvgPriceSqFt_LowFloor,
+    AVG(CASE WHEN Floor >= 4 THEN Price / Area ELSE NULL END) AS AvgPriceSqFt_HighFloor
+FROM PropertyListings
+WHERE Type = 'Residential' AND Area > 0 AND Price >= 0;
+
+-- Q99: Identify the Employee (GeneratedBy) responsible for the lowest TotalAmount invoice that has been fully 'Paid'.
+SELECT
+    e.FullName AS EmployeeName,
+    i.InvoiceID,
+    i.TotalAmount
+FROM Invoices i
+JOIN Employees e ON i.GeneratedBy = e.EmployeeID
+WHERE i.Status = 'Paid' AND i.PaidAmount = i.TotalAmount
+ORDER BY i.TotalAmount ASC
+LIMIT 1;
+
+-- Q100: Find all Projects that have an active 'Lease' or a 'Completed' sale but no 'Maintenance Requests' in the last 12 months.
+SELECT
+    p.Name AS ProjectName
+FROM Projects p
+WHERE p.ProjectID IN (
+    -- Projects with an Active Lease OR Completed Sale
+    SELECT DISTINCT pl.ProjectID
+    FROM PropertyListings pl
+    LEFT JOIN Leases l ON pl.PropertyID = l.PropertyID
+    LEFT JOIN Sales s ON pl.PropertyID = s.PropertyID
+    WHERE l.Status = 'Active' OR s.Status = 'Completed'
+)
+AND p.ProjectID NOT IN (
+    -- Projects with a Maintenance Request in the last 12 months
+    SELECT DISTINCT pl.ProjectID
+    FROM PropertyListings pl
+    JOIN MaintenanceRequests mr ON pl.PropertyID = mr.PropertyID
+    WHERE mr.RequestDate >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+)
+ORDER BY p.Name;
