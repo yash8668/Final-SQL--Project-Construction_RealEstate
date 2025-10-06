@@ -1,44 +1,64 @@
-# 🏡 Real Estate Development and Management System (REDMS)
+# 🏢 Construction & Real Estate Database Analytics
 
-This repository tracks the development of the REDMS, with Phase 5 representing the finalization of the data access layer for integration with the backend application.
+## 📝 Project Description
 
----
+This repository contains a comprehensive set of **25 advanced SQL queries** designed for a `Construction_RealEstate` relational database schema. The queries utilize advanced SQL features, including **Window Functions (Rolling Averages and Ranking)**, **Common Table Expressions (CTEs)**, **Recursive CTEs** (for hierarchical data), and complex `JOIN` operations.
 
-## 🔒 Phase 5: Data Access, Integrity Checks, and Application CRUD
+This collection is intended to provide powerful, actionable business intelligence and operational reporting from the core database, covering sales, construction progress, maintenance, human resources, and financial performance.
 
-Phase 5 focuses on developing robust and verified SQL queries that the application's backend will use for all **Create, Read, Update, and Delete (CRUD)** operations. This phase ensures data integrity is maintained at the operational level and prepares the database for final deployment.
+## ✨ Features
 
-### Objectives of Phase 5
-1.  **CRUD Implementation:** Develop a complete set of `SELECT`, `INSERT`, `UPDATE`, and `DELETE` queries for key operational tables (e.g., `Vendors`, `Materials`, `PurchaseOrders`).
-2.  **Data Validation & Anomalies:** Implement queries to detect and report on potential data issues (e.g., duplicate IDs, low stock, missing updates).
-3.  **Application Transaction Examples:** Provide clear SQL examples of multi-step business transactions (e.g., simultaneous material order and payment update).
-4.  **Final Cleanup:** Perform final data checks and query optimizations before API integration.
+The `PHASE 5.SQL` file provides solutions for 25 distinct business intelligence questions, including:
 
----
+* **Financial & Sales Analysis:**
+    * Calculate the **90-day rolling average** of total daily sales price, partitioned by project type.
+    * Identify projects where the **Total Sales Revenue** of all sold properties **exceeds the Project's initial Budget**.
+    * Calculate the **Budget Variance Percentage** (Actual Cost vs. Budget) for each construction phase and rank them from worst to best.
+    * Determine the **year-over-year growth rate** in Total Sales Price for "Residential" properties.
 
-## 📁 Phase 5 SQL File Structure
+* **Operational & Resource Management:**
+    * Find the **top 3 best-rated Contractors** by average rating who have been assigned a Maintenance Request in the last 6 months.
+    * Retrieve all Materials that have their **StockQuantity less than 10%** of the total Quantity ordered across all Purchase Orders.
+    * Determine the **average lead conversion rate** (Converted Leads / Total Leads) per month for the last 6 months.
 
-The file **`PHASE 5.SQL`** is dedicated to providing the definitive SQL logic for core business operations, primarily focused on the **Procurement** and **Inventory** domains.
+* **Hierarchical & HR Reporting:**
+    * List all Employees, their direct Manager's name, and the total count of subordinates (direct and indirect) under them, leveraging a **Recursive CTE**.
+    * Use a **Recursive CTE** to find the full management chain (from CEO down to each Employee).
 
-### Highlights of Implemented Features
+## 🛠️ Prerequisites
 
-| Feature Category | Description | Example Logic in `PHASE 5.sql` |
-| :--- | :--- | :--- |
-| **Vendor Management** | Comprehensive CRUD and reporting on **T10: Vendors**. | Select vendors by location, service type, email pattern, and **detect duplicate GSTNumbers** (data anomaly detection). |
-| **Material Inventory** | Operational queries for **T11: Materials** inventory control. | Identify materials with **low stock** (`StockQuantity < 100`) or **zero stock**. Find the most expensive materials. |
-| **Procurement Workflow** | CRUD for **T12: PurchaseOrders** and **T24: Invoices**. | List pending purchase orders, calculate total cost for open orders, and update order status. |
-| **Data Insertion (DML)** | Definitive examples of adding new records for testing application inserts. | **`INSERT`** statements for adding new `Vendors`, `Materials`, and `PurchaseOrders`. |
-| **Operational Transactions** | Demonstration of atomic transactions for business logic requiring multiple steps. | **`START TRANSACTION`** block that simultaneously **inserts a Payment** and **updates a PurchaseOrder status** to 'Paid', ensuring data consistency. |
-| **Data Update & Deletion** | Standardized `UPDATE` and `DELETE` statements used by the application for record management. | Update vendor ratings, modify material prices, and delete specific records. |
+To run these queries, you will need:
 
----
+* A **MySQL** or **MariaDB** installation (or a compatible SQL environment).
+* An existing database named `Construction_RealEstate` (as referenced in the first line of the script).
+* The database must be populated with the necessary tables (e.g., `Sales`, `Projects`, `Employees`, `Contractors`, etc.) and data to match the query structures.
 
-## 🏁 Project Status: Data Access Layer Complete
+## 🚀 Usage
 
-With the comprehensive development completed across all five phases, the **REDMS Database Layer** is fully structured, optimized, secured, and equipped with all necessary data access logic.
+Follow these steps to set up the project and run the queries:
 
-### Next Steps (API Integration)
+1.  **Clone the Repository:**
+    ```bash
+    git clone [https://github.com/YourUsername/YourRepoName.git](https://github.com/YourUsername/YourRepoName.git)
+    cd YourRepoName
+    ```
 
-1.  **API Development Focus:** The backend API's data access functions will now directly call the finalized queries, procedures, and views developed in Phases 2-5.
-2.  **Testing Environment:** Use the detailed CRUD queries in `PHASE 5.SQL` as the **unit tests** for the API's database interaction layer (ensuring the application saves, retrieves, and updates data correctly).
-3.  **Final Deployment:** Proceed with integrating the API with the frontend for a full-stack application launch.
+2.  **Run the Script:**
+    You can execute the entire script from your SQL client (e.g., MySQL Workbench, DBeaver) or via the command line.
+
+    **Using the MySQL Command Line:**
+    ```bash
+    mysql -u [your_username] -p Construction_RealEstate < "PHASE 5.SQL"
+    ```
+    *(Note: Replace `[your_username]` with your actual MySQL username.)*
+
+3.  **Review the Output:**
+    The queries are designed to produce reporting-style result sets directly in your SQL client.
+
+## 📄 License
+
+This project is licensed under the **MIT License** - see the `LICENSE.md` file (if you create one) for details.
+
+## ✍️ Contributing
+
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
